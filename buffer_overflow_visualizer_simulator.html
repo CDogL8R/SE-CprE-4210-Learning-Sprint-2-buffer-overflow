@@ -1,0 +1,1321 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Buffer Overflow Visualizer & Interactive Lab</title>
+
+  <!-- Tailwind CSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            brand: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              700: '#0369a1',
+              900: '#0c4a6e',
+            },
+            stack: {
+              buffer: '#1e3a8a',     // Blue
+              admin: '#065f46',      // Green
+              canary: '#854d0e',     // Yellow/Gold
+              ebp: '#581c87',        // Purple
+              eip: '#831843',        // Red
+              args: '#1e293b'        // Slate
+            }
+          },
+          fontFamily: {
+            mono: ['"JetBrains Mono"', 'Consolas', 'Monaco', 'monospace'],
+            sans: ['Inter', 'sans-serif']
+          }
+        }
+      }
+    }
+  </script>
+
+  <!-- Google Fonts & Font Awesome Icons -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+
+  <style>
+    /* Custom Scrollbars & Animation Styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0f172a;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
+    }
+
+    .memory-cell {
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .memory-cell.modified {
+      animation: pulseGlow 1.2s ease-in-out infinite alternate;
+    }
+    @keyframes pulseGlow {
+      0% { transform: scale(1); box-shadow: 0 0 0px rgba(239, 68, 68, 0); }
+      100% { transform: scale(1.03); box-shadow: 0 0 12px rgba(239, 68, 68, 0.6); }
+    }
+
+    .code-line {
+      transition: background-color 0.2s ease;
+    }
+    .code-line.active {
+      background-color: rgba(14, 165, 233, 0.25) !important;
+      border-left: 4px solid #0ea5e9;
+    }
+
+    .terminal-line {
+      animation: fadeIn 0.15s ease-in;
+    }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(2px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+  </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans min-h-screen flex flex-col antialiased selection:bg-brand-500 selection:text-white">
+
+  <!-- Top Navigation / App Header -->
+  <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3.5 flex flex-wrap items-center justify-between gap-4">
+      <div class="flex items-center space-x-3">
+        <div class="h-10 w-10 rounded-xl bg-gradient-to-tr from-brand-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-brand-500/20">
+          <i class="fa-solid fa-shield-cat text-xl text-white"></i>
+        </div>
+        <div>
+          <h1 class="text-lg font-bold tracking-tight text-white flex items-center gap-2">
+            Buffer Overflow Educational Visualizer
+            <span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-brand-500/20 text-brand-400 border border-brand-500/30">x86 Stack Simulator</span>
+          </h1>
+          <p class="text-xs text-slate-400">Interactive Security Teaching Module • Safe Browser Execution</p>
+        </div>
+      </div>
+
+      <!-- Navigation Tabs -->
+      <nav class="flex items-center bg-slate-950 p-1 rounded-xl border border-slate-800 text-xs sm:text-sm font-medium">
+        <button id="tab-btn-sim" onclick="switchTab('sim')" class="tab-btn px-3.5 py-1.5 rounded-lg bg-brand-600 text-white font-semibold shadow transition-all">
+          <i class="fa-solid fa-microchip mr-1.5"></i> Simulator Lab
+        </button>
+        <button id="tab-btn-challenges" onclick="switchTab('challenges')" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">
+          <i class="fa-solid fa-trophy mr-1.5 text-amber-400"></i> Challenges
+        </button>
+        <button id="tab-btn-guide" onclick="switchTab('guide')" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">
+          <i class="fa-solid fa-book-open mr-1.5 text-sky-400"></i> Concepts & Guide
+        </button>
+        <button id="tab-btn-repo" onclick="switchTab('repo')" class="tab-btn px-3.5 py-1.5 rounded-lg text-slate-400 hover:text-white transition-all">
+          <i class="fa-solid fa-file-code mr-1.5 text-emerald-400"></i> Repo Companion
+        </button>
+      </nav>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-6">
+
+    <!-- TAB 1: INTERACTIVE SIMULATOR LAB -->
+    <div id="tab-sim" class="tab-content space-y-6">
+
+      <!-- Presets & Quick Tour Bar -->
+      <div class="bg-slate-900 border border-slate-800 rounded-xl p-4 shadow-sm flex flex-wrap items-center justify-between gap-3">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-wand-magic-sparkles text-brand-400 text-sm"></i>
+          <span class="text-xs font-semibold text-slate-300 uppercase tracking-wider">Preset Scenarios:</span>
+        </div>
+        <div class="flex flex-wrap items-center gap-2">
+          <button onclick="loadPreset('safe')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-circle-check text-emerald-400"></i> Safe Input (6B)
+          </button>
+          <button onclick="loadPreset('full')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-200 border border-slate-700 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-battery-full text-blue-400"></i> Buffer Full (16B)
+          </button>
+          <button onclick="loadPreset('admin')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-amber-300 border border-amber-500/30 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-user-shield text-amber-400"></i> Privilege Escalation
+          </button>
+          <button onclick="loadPreset('hijack')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-rose-300 border border-rose-500/30 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-arrow-trend-up text-rose-400"></i> Hijack EIP
+          </button>
+          <button onclick="loadPreset('crash')" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-red-400 border border-red-500/30 transition flex items-center gap-1.5">
+            <i class="fa-solid fa-triangle-exclamation text-red-500"></i> Segfault Crash
+          </button>
+          <button onclick="resetSimulation()" class="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs text-slate-400 hover:text-slate-200 transition border border-slate-700">
+            <i class="fa-solid fa-rotate-left"></i> Reset
+          </button>
+        </div>
+      </div>
+
+      <!-- Controls & Input Panel -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Input Payload Control (7 cols) -->
+        <div class="lg:col-span-7 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4 flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <label class="text-sm font-semibold text-slate-200 flex items-center gap-2">
+                <i class="fa-solid fa-terminal text-brand-400"></i>
+                Input Buffer Payload (`user_input`)
+              </label>
+              <div class="flex items-center gap-3">
+                <!-- ASCII / HEX Toggle -->
+                <div class="bg-slate-950 p-0.5 rounded-lg border border-slate-800 text-xs flex">
+                  <button id="mode-ascii-btn" onclick="setPayloadMode('ascii')" class="px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium transition">ASCII</button>
+                  <button id="mode-hex-btn" onclick="setPayloadMode('hex')" class="px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition">HEX</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Payload Input Box -->
+            <div class="relative">
+              <textarea id="payload-input" oninput="handleInputUpdate()" rows="3"
+                class="w-full bg-slate-950 border border-slate-800 rounded-xl px-3.5 py-2.5 font-mono text-sm text-slate-100 focus:outline-none focus:border-brand-500 transition resize-none"
+                placeholder="Enter payload string or hex bytes..."></textarea>
+              <div id="hex-hint" class="hidden text-[11px] text-slate-400 mt-1">
+                Format: Enter space-separated hex bytes (e.g. <code class="text-brand-300">41 41 41 41 01 00 00 00</code>)
+              </div>
+            </div>
+          </div>
+
+          <!-- Payload Capacity Gauge & Protection Toggles -->
+          <div class="space-y-3">
+            <div class="flex items-center justify-between text-xs">
+              <span id="capacity-label" class="text-slate-400 font-medium">Payload Length: <strong id="byte-count-text" class="text-white">0</strong> / 16 Bytes</span>
+              <span id="overflow-badge" class="px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono text-[11px]">
+                SAFE WITHIN BUFFER
+              </span>
+            </div>
+            <!-- Meter Bar -->
+            <div class="w-full bg-slate-950 h-2.5 rounded-full overflow-hidden border border-slate-800 flex">
+              <div id="meter-buffer" class="bg-brand-500 h-full transition-all duration-300" style="width: 0%"></div>
+              <div id="meter-admin" class="bg-emerald-500 h-full transition-all duration-300" style="width: 0%"></div>
+              <div id="meter-canary" class="bg-amber-500 h-full transition-all duration-300" style="width: 0%"></div>
+              <div id="meter-ebp" class="bg-purple-500 h-full transition-all duration-300" style="width: 0%"></div>
+              <div id="meter-eip" class="bg-rose-500 h-full transition-all duration-300" style="width: 0%"></div>
+            </div>
+
+            <!-- Security Protections Switchers -->
+            <div class="pt-2 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-4">
+              <div class="flex items-center gap-4">
+                <!-- Stack Canary Switch -->
+                <label class="inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="canary-toggle" onchange="toggleCanary()" class="sr-only peer">
+                  <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-amber-600 relative"></div>
+                  <span class="ml-2 text-xs font-medium text-slate-300 flex items-center gap-1">
+                    <i class="fa-solid fa-shield-halved text-amber-400"></i> Stack Canary (`0xDEADBEEF`)
+                  </span>
+                </label>
+
+                <!-- strncpy Safe API Switch -->
+                <label class="inline-flex items-center cursor-pointer">
+                  <input type="checkbox" id="strncpy-toggle" onchange="toggleStrncpy()" class="sr-only peer">
+                  <div class="w-9 h-5 bg-slate-800 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-emerald-600 relative"></div>
+                  <span class="ml-2 text-xs font-medium text-slate-300 flex items-center gap-1">
+                    <i class="fa-solid fa-lock text-emerald-400"></i> Bounds Check (`strncpy`)
+                  </span>
+                </label>
+              </div>
+
+              <!-- Action Execution Button -->
+              <div class="flex items-center gap-2">
+                <button id="step-btn" onclick="stepExecution()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 transition flex items-center gap-1.5">
+                  <i class="fa-solid fa-forward-step text-brand-400"></i> Step Execution
+                </button>
+                <button id="exec-btn" onclick="runFullExecution()" class="px-4 py-2 rounded-xl bg-brand-600 hover:bg-brand-500 text-white text-xs font-bold shadow-lg shadow-brand-600/30 transition flex items-center gap-1.5">
+                  <i class="fa-solid fa-play"></i> Execute Function
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- C Code Inspector & Execution Pointer (5 cols) -->
+        <div class="lg:col-span-5 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg flex flex-col justify-between">
+          <div>
+            <div class="flex items-center justify-between mb-3">
+              <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-2">
+                <i class="fa-solid fa-code text-brand-400"></i> Vulnerable C Source Code
+              </h3>
+              <span id="api-status-tag" class="text-[11px] font-mono text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded">
+                Unsafe API: strcpy()
+              </span>
+            </div>
+
+            <!-- Code block with line highlighting -->
+            <div class="bg-slate-950 rounded-xl p-3 border border-slate-800 font-mono text-xs overflow-x-auto text-slate-300 space-y-1">
+              <div id="code-line-1" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">1</span><span><span class="text-purple-400">void</span> <span class="text-blue-300">process_user_data</span>(<span class="text-purple-400">char</span> *user_input) {</span></div>
+              <div id="code-line-2" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">2</span><span>  <span class="text-purple-400">int</span> isAdmin = <span class="text-amber-300">0</span>; <span class="text-slate-500">// Local var (4 bytes)</span></span></div>
+              <div id="code-line-3" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">3</span><span>  <span class="text-purple-400">char</span> buffer[<span class="text-amber-300">16</span>]; <span class="text-slate-500">// Destination buffer</span></span></div>
+              <div id="code-line-4" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">4</span><span></span></div>
+              <div id="code-line-5" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">5</span><span>  <span class="text-slate-500">// VULNERABILITY: No boundary checks!</span></span></div>
+              <div id="code-line-6" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">6</span><span>  <span id="code-copy-func" class="text-rose-400 font-bold">strcpy</span>(buffer, user_input);</span></div>
+              <div id="code-line-7" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">7</span><span></span></div>
+              <div id="code-line-8" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">8</span><span>  <span class="text-purple-400">if</span> (isAdmin != <span class="text-amber-300">0</span>) {</span></div>
+              <div id="code-line-9" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">9</span><span>    <span class="text-emerald-400">grant_admin_privileges</span>();</span></div>
+              <div id="code-line-10" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">10</span><span>  }</span></div>
+              <div id="code-line-11" class="code-line px-2 py-0.5 rounded flex"><span class="w-6 text-slate-600 select-none">11</span><span>} <span class="text-slate-500">// Function Epilogue / ret instruction</span></span></div>
+            </div>
+          </div>
+
+          <!-- Execution Step Explanation Callout -->
+          <div class="mt-3 bg-slate-950/60 border border-slate-800 rounded-xl p-3 text-xs">
+            <div class="text-slate-400 font-medium flex items-center justify-between mb-1">
+              <span>Execution State:</span>
+              <span id="step-name" class="text-brand-300 font-mono">Idle / Ready</span>
+            </div>
+            <p id="step-description" class="text-slate-300 text-[11px] leading-relaxed">
+              Enter a payload and press "Execute Function" or "Step Execution" to watch how data writes into memory.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Memory Visualization Grid & Registers Section -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+        <!-- Central Memory Visualizer (8 cols) -->
+        <div class="lg:col-span-8 bg-slate-900 border border-slate-800 rounded-2xl p-5 shadow-lg space-y-4">
+          <div class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 pb-3">
+            <div>
+              <h2 class="text-base font-bold text-white flex items-center gap-2">
+                <i class="fa-solid fa-layer-group text-brand-400"></i> Stack Memory Layout
+              </h2>
+              <p class="text-xs text-slate-400">High Addresses (Top) to Low Addresses (Bottom) • 1 Box = 1 Byte</p>
+            </div>
+
+            <!-- Memory Direction & Legend -->
+            <div class="flex items-center gap-3 text-[11px]">
+              <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-blue-900/80 border border-blue-500"></span> Buffer[16]</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-emerald-900/80 border border-emerald-500"></span> isAdmin</span>
+              <span id="canary-legend-item" class="hidden flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-900/80 border border-amber-500"></span> Canary</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-purple-900/80 border border-purple-500"></span> Saved EBP</span>
+              <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-rose-900/80 border border-rose-500"></span> Return Addr (EIP)</span>
+            </div>
+          </div>
+
+          <!-- Direction Paradox Banner -->
+          <div class="bg-slate-950/80 rounded-xl p-2.5 border border-slate-800 flex items-center justify-between text-xs text-slate-300">
+            <div class="flex items-center gap-2">
+              <i class="fa-solid fa-arrow-down-long text-rose-400 animate-bounce"></i>
+              <span><strong>Stack Allocation:</strong> Grows Downward (High &#8594; Low Address)</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span><strong>Array Writing:</strong> Grows Upward (Low &#8594; High Address)</span>
+              <i class="fa-solid fa-arrow-up-long text-brand-400 animate-bounce"></i>
+            </div>
+          </div>
+
+          <!-- Dynamic Memory Cells Stack Grid -->
+          <div id="memory-grid-container" class="space-y-3 font-mono text-xs max-h-[500px] overflow-y-auto pr-1">
+            <!-- Memory rows will be rendered programmatically here -->
+          </div>
+        </div>
+
+        <!-- System CPU Registers & Terminal Console (4 cols) -->
+        <div class="lg:col-span-4 space-y-6">
+
+          <!-- CPU Register & State Monitor -->
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg space-y-3">
+            <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center justify-between">
+              <span><i class="fa-solid fa-microchip text-brand-400 mr-1.5"></i> CPU Registers & State</span>
+              <span id="cpu-status-badge" class="px-2 py-0.5 text-[10px] rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">NORMAL</span>
+            </h3>
+
+            <div class="grid grid-cols-2 gap-2 text-xs font-mono">
+              <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                <div class="text-[10px] text-slate-500 font-sans">EIP / RIP (Instruction)</div>
+                <div id="reg-eip" class="font-bold text-rose-400 mt-0.5">0x00401050</div>
+                <div class="text-[9px] text-slate-500 mt-0.5 truncate" id="reg-eip-label">main() return target</div>
+              </div>
+              <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                <div class="text-[10px] text-slate-500 font-sans">EBP / RBP (Frame Pointer)</div>
+                <div id="reg-ebp" class="font-bold text-purple-400 mt-0.5">0x7fffffffdf40</div>
+                <div class="text-[9px] text-slate-500 mt-0.5">Caller stack base</div>
+              </div>
+              <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                <div class="text-[10px] text-slate-500 font-sans">isAdmin Variable</div>
+                <div id="reg-admin" class="font-bold text-emerald-400 mt-0.5">0x00000000 (0)</div>
+                <div id="reg-admin-status" class="text-[9px] text-slate-400 mt-0.5">Access Denied</div>
+              </div>
+              <div class="bg-slate-950 p-2.5 rounded-xl border border-slate-800">
+                <div class="text-[10px] text-slate-500 font-sans">Stack Canary</div>
+                <div id="reg-canary" class="font-bold text-amber-400 mt-0.5">DISABLED</div>
+                <div id="reg-canary-status" class="text-[9px] text-slate-500 mt-0.5">No protection</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Terminal Execution Log Console -->
+          <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-lg flex flex-col h-[320px]">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-800 mb-2">
+              <span class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center gap-1.5">
+                <i class="fa-solid fa-terminal text-emerald-400"></i> Execution Terminal Log
+              </span>
+              <button onclick="clearConsole()" class="text-[11px] text-slate-500 hover:text-slate-300 transition">Clear</button>
+            </div>
+
+            <!-- Terminal Output Window -->
+            <div id="terminal-body" class="flex-1 bg-slate-950 rounded-xl p-3 font-mono text-[11px] text-slate-300 overflow-y-auto space-y-1.5 border border-slate-800">
+              <div class="text-slate-500">[SYSTEM] Buffer Overflow Lab Engine initialized.</div>
+              <div class="text-slate-500">[SYSTEM] Target function address target: secret_admin_function() = 0x00401190</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 2: GUIDED INTERACTIVE CHALLENGES -->
+    <div id="tab-challenges" class="tab-content hidden space-y-6">
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg">
+        <div class="max-w-3xl">
+          <h2 class="text-xl font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-trophy text-amber-400"></i>
+            Interactive Buffer Overflow Mastery Challenges
+          </h2>
+          <p class="text-sm text-slate-400 mt-1">
+            Complete the hands-on lab challenges below. Test your understanding of stack frame layouts, offset math, privilege escalation, and defense mechanisms.
+          </p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+
+          <!-- Challenge 1 -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 flex flex-col justify-between relative overflow-hidden">
+            <div id="ch1-badge" class="absolute top-3 right-3 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
+              Not Solved
+            </div>
+            <div>
+              <div class="text-xs font-mono text-brand-400 font-bold uppercase tracking-wider">Challenge 1</div>
+              <h3 class="text-base font-bold text-white mt-1">Normal Operation</h3>
+              <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+                Provide a standard text payload that fills part of the buffer without exceeding its 16-byte capacity. Ensure clean return to <code class="text-brand-300">main()</code>.
+              </p>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+              <button onclick="loadChallengePreset(1)" class="px-3 py-1.5 rounded-lg bg-brand-600 hover:bg-brand-500 text-white text-xs font-semibold transition">
+                Load in Simulator
+              </button>
+              <span class="text-[11px] text-slate-500">Target: Length &#8804; 16B</span>
+            </div>
+          </div>
+
+          <!-- Challenge 2 -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 flex flex-col justify-between relative overflow-hidden">
+            <div id="ch2-badge" class="absolute top-3 right-3 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
+              Not Solved
+            </div>
+            <div>
+              <div class="text-xs font-mono text-amber-400 font-bold uppercase tracking-wider">Challenge 2</div>
+              <h3 class="text-base font-bold text-white mt-1">Flip the Bit (Privilege Escalation)</h3>
+              <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+                Craft a payload that fills <code class="text-blue-300">buffer[16]</code> and overflows into <code class="text-emerald-300">isAdmin</code> to set its value to non-zero, granting admin privileges without crashing EIP.
+              </p>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+              <button onclick="loadChallengePreset(2)" class="px-3 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-semibold transition">
+                Load in Simulator
+              </button>
+              <span class="text-[11px] text-slate-500">Target: isAdmin &gt; 0</span>
+            </div>
+          </div>
+
+          <!-- Challenge 3 -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 flex flex-col justify-between relative overflow-hidden">
+            <div id="ch3-badge" class="absolute top-3 right-3 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
+              Not Solved
+            </div>
+            <div>
+              <div class="text-xs font-mono text-rose-400 font-bold uppercase tracking-wider">Challenge 3</div>
+              <h3 class="text-base font-bold text-white mt-1">Hijack Control Flow</h3>
+              <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+                Calculate the exact byte offset to the Saved EIP return address and overwrite it with <code class="text-rose-300">0x00401190</code> (<code class="text-rose-300">secret_admin_function</code>).
+              </p>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+              <button onclick="loadChallengePreset(3)" class="px-3 py-1.5 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition">
+                Load in Simulator
+              </button>
+              <span class="text-[11px] text-slate-500">Target: EIP = 0x00401190</span>
+            </div>
+          </div>
+
+          <!-- Challenge 4 -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 flex flex-col justify-between relative overflow-hidden">
+            <div id="ch4-badge" class="absolute top-3 right-3 text-xs font-semibold px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-400">
+              Not Solved
+            </div>
+            <div>
+              <div class="text-xs font-mono text-purple-400 font-bold uppercase tracking-wider">Challenge 4</div>
+              <h3 class="text-base font-bold text-white mt-1">Canary Defense Interception</h3>
+              <p class="text-xs text-slate-400 mt-2 leading-relaxed">
+                Enable the Stack Canary option in the simulator. Attempt an overflow and observe how <code class="text-amber-300">__stack_chk_fail</code> detects memory corruption before execution completes.
+              </p>
+            </div>
+            <div class="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between">
+              <button onclick="loadChallengePreset(4)" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold transition">
+                Load in Simulator
+              </button>
+              <span class="text-[11px] text-slate-500">Target: Trigger Canary Violation</span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 3: CORE EDUCATIONAL CONCEPTS & GLOSSARY -->
+    <div id="tab-guide" class="tab-content hidden space-y-6">
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg space-y-6">
+        <div>
+          <h2 class="text-2xl font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-book-bookmark text-sky-400"></i>
+            Core Concepts & Architectural Reference Guide
+          </h2>
+          <p class="text-sm text-slate-400 mt-1">
+            Understanding x86 memory layout, call stack anatomy, vulnerable C functions, and defense engineering.
+          </p>
+        </div>
+
+        <!-- Concept Cards Grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+
+          <!-- 1. The Call Stack Anatomy -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div class="flex items-center gap-2 text-brand-400 font-bold text-sm">
+              <i class="fa-solid fa-layer-group"></i> 1. Call Stack Anatomy
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              When a C function is called, a contiguous region of memory called a <strong>Stack Frame</strong> is created. In x86 architecture, the stack grows downwards toward lower memory addresses, but arrays write upwards toward higher addresses.
+            </p>
+            <ul class="text-xs text-slate-400 space-y-1.5 list-disc list-inside">
+              <li><strong class="text-slate-200">Return Address (EIP/RIP):</strong> Stores where control returns after function completion.</li>
+              <li><strong class="text-slate-200">Saved Frame Pointer (EBP/RBP):</strong> Holds the base pointer of the caller's stack frame.</li>
+              <li><strong class="text-slate-200">Local Variables:</strong> Allocated below saved registers on the stack.</li>
+            </ul>
+          </div>
+
+          <!-- 2. Why Unbounded Copies Fail -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div class="flex items-center gap-2 text-rose-400 font-bold text-sm">
+              <i class="fa-solid fa-bug"></i> 2. Why strcpy() is Vulnerable
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              Functions like <code class="text-rose-300">strcpy(dest, src)</code> copy characters until a null terminator (<code class="text-rose-300">'\0'</code>) is encountered. They do not verify whether the destination buffer has sufficient capacity.
+            </p>
+            <div class="bg-slate-900 p-2.5 rounded-lg border border-slate-800 font-mono text-[11px] text-slate-300">
+              <span class="text-rose-400 font-bold">Unsafe:</span> strcpy(), gets(), sprintf(), strcat()<br>
+              <span class="text-emerald-400 font-bold">Safe:</span> strncpy(), fgets(), snprintf(), strlcat()
+            </div>
+          </div>
+
+          <!-- 3. Control Flow Hijacking -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div class="flex items-center gap-2 text-amber-400 font-bold text-sm">
+              <i class="fa-solid fa-arrows-split-up-and-left"></i> 3. Control Flow Hijacking
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+              When input exceeds the allocated buffer, excess bytes spill over adjacent local variables, saved EBP, and eventually overwrite the <strong>Return Address (EIP)</strong>. When the function finishes with <code class="text-amber-300">ret</code>, the CPU pops the overwritten address into EIP, jumping to attacker-chosen instructions.
+            </p>
+          </div>
+
+          <!-- 4. Modern Stack Protections -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-5 space-y-3">
+            <div class="flex items-center gap-2 text-emerald-400 font-bold text-sm">
+              <i class="fa-solid fa-shield-halved"></i> 4. Compiler Protections
+            </div>
+            <ul class="text-xs text-slate-300 space-y-2">
+              <li>
+                <strong class="text-amber-300">Stack Canaries (StackGuard):</strong> Places a secret random value right before saved EBP. Before returning, the function verifies canary integrity. If corrupted, it terminates immediately via <code class="text-slate-400">__stack_chk_fail()</code>.
+              </li>
+              <li>
+                <strong class="text-brand-300">ASLR (Address Space Layout Randomization):</strong> Randomizes stack, heap, and library memory locations on each execution.
+              </li>
+              <li>
+                <strong class="text-purple-300">NX / DEP (No-Execute / Data Execution Prevention):</strong> Marks stack pages as non-executable to prevent shellcode execution.
+              </li>
+            </ul>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+
+    <!-- TAB 4: GITHUB REPOSITORY COMPANION -->
+    <div id="tab-repo" class="tab-content hidden space-y-6">
+
+      <div class="bg-slate-900 border border-slate-800 rounded-2xl p-6 shadow-lg space-y-6">
+        <div class="flex flex-wrap items-center justify-between gap-4">
+          <div>
+            <h2 class="text-xl font-bold text-white flex items-center gap-2">
+              <i class="fa-solid fa-file-export text-emerald-400"></i>
+              GitHub Submission Companion & Markdown Generator
+            </h2>
+            <p class="text-sm text-slate-400 mt-1">
+              Generate submission-ready <code class="text-emerald-300">README.md</code> and <code class="text-emerald-300">reflection.md</code> files for your course repository.
+            </p>
+          </div>
+        </div>
+
+        <!-- Customization Form -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-950 p-4 rounded-xl border border-slate-800 text-xs">
+          <div>
+            <label class="block text-slate-400 font-medium mb-1">Student Name / Team</label>
+            <input type="text" id="meta-student-name" value="Security Learner" oninput="generateMarkdownFiles()" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block text-slate-400 font-medium mb-1">Course Title</label>
+            <input type="text" id="meta-course-title" value="Computer Security / Systems Programming" oninput="generateMarkdownFiles()" class="w-full bg-slate-900 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-200 focus:outline-none focus:border-brand-500">
+          </div>
+          <div>
+            <label class="block text-slate-400 font-medium mb-1">Topic Selected</label>
+            <input type="text" id="meta-topic" value="x86 Stack Buffer Overflow & Protections" readonly class="w-full bg-slate-900/50 border border-slate-800 rounded-lg px-3 py-1.5 text-slate-400 cursor-not-allowed">
+          </div>
+        </div>
+
+        <!-- File Tabs & Generator Outputs -->
+        <div class="space-y-4">
+          <!-- README Generator -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-xs font-bold text-emerald-400 flex items-center gap-1.5">
+                <i class="fa-regular fa-file-code"></i> README.md
+              </span>
+              <button onclick="copyToClipboard('readme-output')" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg transition flex items-center gap-1">
+                <i class="fa-regular fa-copy"></i> Copy README.md
+              </button>
+            </div>
+            <textarea id="readme-output" rows="8" readonly class="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 font-mono text-xs text-slate-300 focus:outline-none select-all"></textarea>
+          </div>
+
+          <!-- Reflection Generator -->
+          <div class="bg-slate-950 border border-slate-800 rounded-xl p-4 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="font-mono text-xs font-bold text-sky-400 flex items-center gap-1.5">
+                <i class="fa-regular fa-file-lines"></i> reflection.md (Maximum 1 Page Reflection)
+              </span>
+              <button onclick="copyToClipboard('reflection-output')" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded-lg transition flex items-center gap-1">
+                <i class="fa-regular fa-copy"></i> Copy reflection.md
+              </button>
+            </div>
+            <textarea id="reflection-output" rows="10" readonly class="w-full bg-slate-900 border border-slate-800 rounded-lg p-3 font-mono text-xs text-slate-300 focus:outline-none select-all"></textarea>
+          </div>
+        </div>
+
+      </div>
+
+    </div>
+
+  </main>
+
+  <script>
+    // Simulator Memory Specs
+    const BUFFER_SIZE = 16;
+    const ADMIN_VAR_SIZE = 4;
+    const CANARY_SIZE = 4;
+    const EBP_SIZE = 4;
+    const EIP_SIZE = 4;
+
+    // Default Addresses
+    const BASE_ADDR = 0x7fffffffdf10;
+    const CANARY_VAL_HEX = "DEADBEEF";
+    const TARGET_ADMIN_FUNC_ADDR = "00401190";
+    const DEFAULT_EIP_ADDR = "00401050";
+    const DEFAULT_EBP_ADDR = "df40ffff7f";
+
+    // Application State
+    let canaryEnabled = false;
+    let strncpyEnabled = false;
+    let payloadMode = 'ascii'; // 'ascii' or 'hex'
+    let currentStep = 0;
+    let challengeStatus = [false, false, false, false];
+
+    // Array of raw byte numbers (0..255)
+    let payloadBytes = [];
+
+    function switchTab(tabId) {
+      document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('bg-brand-600', 'text-white', 'shadow');
+        btn.classList.add('text-slate-400');
+      });
+
+      const activeTab = document.getElementById(`tab-${tabId}`);
+      const activeBtn = document.getElementById(`tab-btn-${tabId}`);
+      if (activeTab && activeBtn) {
+        activeTab.classList.remove('hidden');
+        activeBtn.classList.add('bg-brand-600', 'text-white', 'shadow');
+        activeBtn.classList.remove('text-slate-400');
+      }
+    }
+
+    function parsePayloadInput() {
+      const inputVal = document.getElementById('payload-input').value;
+      let bytes = [];
+
+      if (payloadMode === 'ascii') {
+        for (let i = 0; i < inputVal.length; i++) {
+          bytes.push(inputVal.charCodeAt(i) & 0xFF);
+        }
+      } else {
+        // Hex mode: parse hex tokens e.g. "41 42 43" or "414243"
+        const cleanHex = inputVal.replace(/0x/g, '').replace(/[^0-9a-fA-F]/g, ' ');
+        const tokens = cleanHex.trim().split(/\s+/);
+        tokens.forEach(tok => {
+          if (tok.length > 0) {
+            if (tok.length === 2) {
+              bytes.push(parseInt(tok, 16) & 0xFF);
+            } else if (tok.length % 2 === 0) {
+              for (let k = 0; k < tok.length; k += 2) {
+                bytes.push(parseInt(tok.substr(k, 2), 16) & 0xFF);
+              }
+            }
+          }
+        });
+      }
+
+      if (strncpyEnabled && bytes.length > BUFFER_SIZE) {
+        bytes = bytes.slice(0, BUFFER_SIZE);
+      }
+
+      return bytes;
+    }
+
+    function setPayloadMode(mode) {
+      payloadMode = mode;
+      const asciiBtn = document.getElementById('mode-ascii-btn');
+      const hexBtn = document.getElementById('mode-hex-btn');
+      const hint = document.getElementById('hex-hint');
+
+      if (mode === 'ascii') {
+        asciiBtn.className = 'px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium transition';
+        hexBtn.className = 'px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition';
+        hint.classList.add('hidden');
+      } else {
+        hexBtn.className = 'px-2.5 py-1 rounded-md bg-brand-600 text-white font-medium transition';
+        asciiBtn.className = 'px-2.5 py-1 rounded-md text-slate-400 hover:text-white transition';
+        hint.classList.remove('hidden');
+      }
+      handleInputUpdate();
+    }
+
+    function toggleCanary() {
+      canaryEnabled = document.getElementById('canary-toggle').checked;
+      document.getElementById('canary-legend-item').style.display = canaryEnabled ? 'flex' : 'none';
+      const regCanary = document.getElementById('reg-canary');
+      const regCanaryStat = document.getElementById('reg-canary-status');
+
+      if (canaryEnabled) {
+        regCanary.textContent = '0xDEADBEEF';
+        regCanary.className = 'font-bold text-amber-400 mt-0.5';
+        regCanaryStat.textContent = 'Active (StackGuard)';
+        logTerminal('[SECURITY] Stack Canary protection ENABLED (Word: 0xDEADBEEF)', 'text-amber-400');
+      } else {
+        regCanary.textContent = 'DISABLED';
+        regCanary.className = 'font-bold text-slate-500 mt-0.5';
+        regCanaryStat.textContent = 'No protection';
+        logTerminal('[SECURITY] Stack Canary protection DISABLED', 'text-slate-400');
+      }
+      handleInputUpdate();
+    }
+
+    function toggleStrncpy() {
+      strncpyEnabled = document.getElementById('strncpy-toggle').checked;
+      const apiTag = document.getElementById('api-status-tag');
+      const funcNameInCode = document.getElementById('code-copy-func');
+
+      if (strncpyEnabled) {
+        apiTag.textContent = 'Safe API: strncpy(buf, in, 16)';
+        apiTag.className = 'text-[11px] font-mono text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2 py-0.5 rounded';
+        funcNameInCode.textContent = 'strncpy';
+        funcNameInCode.className = 'text-emerald-400 font-bold';
+        logTerminal('[SECURITY] Bounds checking API strncpy() ENABLED', 'text-emerald-400');
+      } else {
+        apiTag.textContent = 'Unsafe API: strcpy()';
+        apiTag.className = 'text-[11px] font-mono text-rose-400 bg-rose-500/10 border border-rose-500/20 px-2 py-0.5 rounded';
+        funcNameInCode.textContent = 'strcpy';
+        funcNameInCode.className = 'text-rose-400 font-bold';
+        logTerminal('[SECURITY] Unsafe API strcpy() ACTIVE', 'text-rose-400');
+      }
+      handleInputUpdate();
+    }
+
+    function calculateMemoryLayout() {
+      // Memory offsets from base address df10
+      // 0..15 : buffer[16]
+      // 16..19: isAdmin (4)
+      // 20..23: Canary (4 if enabled)
+      // 24..27: Saved EBP (4)
+      // 28..31: Return Address EIP (4)
+      const layout = [];
+      let offset = 0;
+
+      // Buffer
+      for (let i = 0; i < BUFFER_SIZE; i++) {
+        layout.push({
+          offset: offset++,
+          region: 'buffer',
+          name: `buffer[${i}]`,
+          label: 'Buffer',
+          color: 'border-blue-500/40 bg-blue-950/40 text-blue-200'
+        });
+      }
+
+      // isAdmin
+      for (let i = 0; i < ADMIN_VAR_SIZE; i++) {
+        layout.push({
+          offset: offset++,
+          region: 'admin',
+          name: `isAdmin byte ${i}`,
+          label: 'isAdmin',
+          color: 'border-emerald-500/40 bg-emerald-950/40 text-emerald-200'
+        });
+      }
+
+      // Canary (if active)
+      if (canaryEnabled) {
+        for (let i = 0; i < CANARY_SIZE; i++) {
+          layout.push({
+            offset: offset++,
+            region: 'canary',
+            name: `Canary byte ${i}`,
+            label: 'Canary',
+            color: 'border-amber-500/40 bg-amber-950/40 text-amber-200'
+          });
+        }
+      }
+
+      // Saved EBP
+      for (let i = 0; i < EBP_SIZE; i++) {
+        layout.push({
+          offset: offset++,
+          region: 'ebp',
+          name: `Saved EBP byte ${i}`,
+          label: 'Saved EBP',
+          color: 'border-purple-500/40 bg-purple-950/40 text-purple-200'
+        });
+      }
+
+      // Return Address (EIP)
+      for (let i = 0; i < EIP_SIZE; i++) {
+        layout.push({
+          offset: offset++,
+          region: 'eip',
+          name: `Return Addr (EIP) byte ${i}`,
+          label: 'Saved EIP',
+          color: 'border-rose-500/40 bg-rose-950/40 text-rose-200'
+        });
+      }
+
+      return layout;
+    }
+
+    function renderMemoryGrid() {
+      const container = document.getElementById('memory-grid-container');
+      const layout = calculateMemoryLayout();
+      payloadBytes = parsePayloadInput();
+
+      container.innerHTML = '';
+
+      // Render rows grouped by 4 bytes (Word boundary)
+      for (let row = layout.length - 4; row >= 0; row -= 4) {
+        const rowSlice = layout.slice(row, row + 4);
+        const startAddrHex = '0x' + (BASE_ADDR + rowSlice[0].offset).toString(16);
+
+        const rowDiv = document.createElement('div');
+        rowDiv.className = 'bg-slate-950 p-2.5 rounded-xl border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3';
+
+        const leftMeta = document.createElement('div');
+        leftMeta.className = 'w-44 text-[11px] font-mono flex flex-col';
+        leftMeta.innerHTML = `
+          <span class="text-slate-400 font-bold">${startAddrHex}</span>
+          <span class="text-[10px] text-slate-500">${rowSlice[0].label} Segment</span>
+        `;
+
+        const cellsDiv = document.createElement('div');
+        cellsDiv.className = 'grid grid-cols-4 gap-2 flex-1';
+
+        rowSlice.forEach((cellInfo) => {
+          const byteIdx = cellInfo.offset;
+          let hexDisplay = '00';
+          let charDisplay = '.';
+          let isWritten = false;
+
+          // Compute initial default bytes vs written payload bytes
+          if (cellInfo.region === 'buffer') {
+            if (byteIdx < payloadBytes.length) {
+              const b = payloadBytes[byteIdx];
+              hexDisplay = b.toString(16).padStart(2, '0').toUpperCase();
+              charDisplay = (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.';
+              isWritten = true;
+            }
+          } else if (cellInfo.region === 'admin') {
+            const adminLocalIdx = byteIdx - BUFFER_SIZE;
+            if (byteIdx < payloadBytes.length) {
+              const b = payloadBytes[byteIdx];
+              hexDisplay = b.toString(16).padStart(2, '0').toUpperCase();
+              charDisplay = (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.';
+              isWritten = true;
+            }
+          } else if (cellInfo.region === 'canary') {
+            const canaryLocalIdx = byteIdx - (BUFFER_SIZE + ADMIN_VAR_SIZE);
+            const defaultCanaryBytes = [0xDE, 0xAD, 0xBE, 0xEF];
+            if (byteIdx < payloadBytes.length) {
+              const b = payloadBytes[byteIdx];
+              hexDisplay = b.toString(16).padStart(2, '0').toUpperCase();
+              charDisplay = (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.';
+              isWritten = true;
+            } else {
+              hexDisplay = defaultCanaryBytes[canaryLocalIdx].toString(16).toUpperCase();
+            }
+          } else if (cellInfo.region === 'ebp') {
+            const ebpOffset = BUFFER_SIZE + ADMIN_VAR_SIZE + (canaryEnabled ? CANARY_SIZE : 0);
+            if (byteIdx < payloadBytes.length) {
+              const b = payloadBytes[byteIdx];
+              hexDisplay = b.toString(16).padStart(2, '0').toUpperCase();
+              charDisplay = (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.';
+              isWritten = true;
+            } else {
+              const defaultEBP = [0x40, 0xDF, 0xFF, 0x7F];
+              hexDisplay = defaultEBP[byteIdx - ebpOffset].toString(16).padStart(2, '0').toUpperCase();
+            }
+          } else if (cellInfo.region === 'eip') {
+            const eipOffset = BUFFER_SIZE + ADMIN_VAR_SIZE + (canaryEnabled ? CANARY_SIZE : 0) + EBP_SIZE;
+            if (byteIdx < payloadBytes.length) {
+              const b = payloadBytes[byteIdx];
+              hexDisplay = b.toString(16).padStart(2, '0').toUpperCase();
+              charDisplay = (b >= 32 && b <= 126) ? String.fromCharCode(b) : '.';
+              isWritten = true;
+            } else {
+              const defaultEIP = [0x50, 0x10, 0x40, 0x00];
+              hexDisplay = defaultEIP[byteIdx - eipOffset].toString(16).padStart(2, '0').toUpperCase();
+            }
+          }
+
+          const cellEl = document.createElement('div');
+          cellEl.className = `memory-cell border rounded-lg p-2 text-center text-xs flex flex-col justify-center items-center ${cellInfo.color} ${isWritten ? 'modified ring-1 ring-rose-500/50' : ''}`;
+          cellEl.title = `${cellInfo.name} @ 0x${(BASE_ADDR + cellInfo.offset).toString(16)}`;
+          cellEl.innerHTML = `
+            <span class="font-bold font-mono tracking-wider">${hexDisplay}</span>
+            <span class="text-[10px] opacity-60 font-sans mt-0.5">'${charDisplay}'</span>
+          `;
+
+          cellsDiv.appendChild(cellEl);
+        });
+
+        rowDiv.appendChild(leftMeta);
+        rowDiv.appendChild(cellsDiv);
+        container.appendChild(rowDiv);
+      }
+
+      updateGaugesAndRegisters();
+    }
+
+    function updateGaugesAndRegisters() {
+      const bytes = payloadBytes;
+      const len = bytes.length;
+
+      document.getElementById('byte-count-text').textContent = len;
+
+      // Compute meter percentages
+      const bufPct = Math.min(len, 16) / 16 * 100;
+      let rem = Math.max(0, len - 16);
+
+      const adminPct = Math.min(rem, 4) / 4 * 100;
+      rem = Math.max(0, rem - 4);
+
+      let canaryPct = 0;
+      if (canaryEnabled) {
+        canaryPct = Math.min(rem, 4) / 4 * 100;
+        rem = Math.max(0, rem - 4);
+      }
+
+      const ebpPct = Math.min(rem, 4) / 4 * 100;
+      rem = Math.max(0, rem - 4);
+
+      const eipPct = Math.min(rem, 4) / 4 * 100;
+
+      document.getElementById('meter-buffer').style.width = `${bufPct * 0.5}%`;
+      document.getElementById('meter-admin').style.width = `${adminPct * 0.15}%`;
+      document.getElementById('meter-canary').style.width = canaryEnabled ? `${canaryPct * 0.15}%` : '0%';
+      document.getElementById('meter-ebp').style.width = `${ebpPct * 0.10}%`;
+      document.getElementById('meter-eip').style.width = `${eipPct * 0.10}%`;
+
+      // Badge update
+      const badge = document.getElementById('overflow-badge');
+      if (len <= 16) {
+        badge.textContent = "SAFE WITHIN BUFFER";
+        badge.className = "px-2 py-0.5 rounded-md bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 font-mono text-[11px]";
+      } else if (len <= 20) {
+        badge.textContent = `OVERFLOW: +${len - 16}B (isAdmin Overwritten)`;
+        badge.className = "px-2 py-0.5 rounded-md bg-amber-500/10 text-amber-400 border border-amber-500/20 font-mono text-[11px]";
+      } else {
+        badge.textContent = `CRITICAL OVERFLOW: +${len - 16}B (Control Flow Threat)`;
+        badge.className = "px-2 py-0.5 rounded-md bg-rose-500/10 text-rose-400 border border-rose-500/20 font-mono text-[11px]";
+      }
+
+      // Calculate isAdmin value
+      let adminVal = 0;
+      if (len > 16) {
+        adminVal = bytes[16]; // byte 0 of int isAdmin
+      }
+
+      const regAdmin = document.getElementById('reg-admin');
+      const regAdminStat = document.getElementById('reg-admin-status');
+
+      regAdmin.textContent = `0x${adminVal.toString(16).padStart(8, '0')} (${adminVal})`;
+      if (adminVal !== 0) {
+        regAdmin.className = 'font-bold text-amber-400 mt-0.5';
+        regAdminStat.textContent = 'ADMIN GRANTED!';
+        regAdminStat.className = 'text-[9px] text-amber-400 font-bold mt-0.5';
+      } else {
+        regAdmin.className = 'font-bold text-emerald-400 mt-0.5';
+        regAdminStat.textContent = 'Access Denied';
+        regAdminStat.className = 'text-[9px] text-slate-400 mt-0.5';
+      }
+
+      // Calculate EIP value
+      const eipOffset = BUFFER_SIZE + ADMIN_VAR_SIZE + (canaryEnabled ? CANARY_SIZE : 0) + EBP_SIZE;
+      let eipHex = DEFAULT_EIP_ADDR;
+
+      if (len > eipOffset) {
+        let eipBytes = [0x50, 0x10, 0x40, 0x00];
+        for (let i = 0; i < 4; i++) {
+          if (eipOffset + i < len) {
+            eipBytes[i] = bytes[eipOffset + i];
+          }
+        }
+        // Convert Little-Endian bytes to Hex String
+        const eipNum = (eipBytes[3] << 24) | (eipBytes[2] << 16) | (eipBytes[1] << 8) | eipBytes[0];
+        eipHex = (eipNum >>> 0).toString(16).padStart(8, '0');
+      }
+
+      const regEip = document.getElementById('reg-eip');
+      const regEipLabel = document.getElementById('reg-eip-label');
+
+      regEip.textContent = `0x${eipHex}`;
+      if (eipHex.toLowerCase() === TARGET_ADMIN_FUNC_ADDR) {
+        regEip.className = 'font-bold text-rose-400 mt-0.5 animate-pulse';
+        regEipLabel.textContent = 'HIJACKED -> secret_admin_function()';
+        regEipLabel.className = 'text-[9px] text-rose-400 font-bold mt-0.5';
+      } else if (eipHex !== DEFAULT_EIP_ADDR) {
+        regEip.className = 'font-bold text-red-500 mt-0.5';
+        regEipLabel.textContent = 'CORRUPTED ADDRESS (SEGFAULT)';
+        regEipLabel.className = 'text-[9px] text-red-400 font-bold mt-0.5';
+      } else {
+        regEip.className = 'font-bold text-rose-400 mt-0.5';
+        regEipLabel.textContent = 'main() return target';
+        regEipLabel.className = 'text-[9px] text-slate-500 mt-0.5';
+      }
+    }
+
+    function handleInputUpdate() {
+      renderMemoryGrid();
+      currentStep = 0;
+      highlightCodeLine(0);
+      document.getElementById('step-name').textContent = 'Idle / Payload Loaded';
+      document.getElementById('step-description').textContent = 'Payload updated. Click "Execute Function" or "Step Execution" to run step-by-step.';
+    }
+
+    function highlightCodeLine(lineNum) {
+      for (let i = 1; i <= 11; i++) {
+        const line = document.getElementById(`code-line-${i}`);
+        if (line) line.classList.remove('active');
+      }
+      if (lineNum > 0) {
+        const active = document.getElementById(`code-line-${lineNum}`);
+        if (active) active.classList.add('active');
+      }
+    }
+
+    function stepExecution() {
+      currentStep = (currentStep % 5) + 1;
+      const bytes = payloadBytes;
+      const len = bytes.length;
+
+      const eipOffset = BUFFER_SIZE + ADMIN_VAR_SIZE + (canaryEnabled ? CANARY_SIZE : 0) + EBP_SIZE;
+      const canaryOffset = BUFFER_SIZE + ADMIN_VAR_SIZE;
+
+      if (currentStep === 1) {
+        highlightCodeLine(1);
+        document.getElementById('step-name').textContent = 'Step 1: Function Prologue';
+        document.getElementById('step-description').textContent = 'CPU pushes caller EBP, creates new stack frame, and allocates space for buffer and local variables.';
+        logTerminal('[EXEC] Entering process_user_data(user_input)...', 'text-brand-300');
+      } else if (currentStep === 2) {
+        highlightCodeLine(2);
+        document.getElementById('step-name').textContent = 'Step 2: Variable Init';
+        document.getElementById('step-description').textContent = 'Initializing local variable int isAdmin = 0 at [EBP - 4].';
+        logTerminal('[EXEC] Local variable initialized: isAdmin = 0', 'text-slate-300');
+      } else if (currentStep === 3) {
+        highlightCodeLine(6);
+        document.getElementById('step-name').textContent = 'Step 3: Copying Buffer';
+        if (strncpyEnabled) {
+          document.getElementById('step-description').textContent = `strncpy(buffer, user_input, 16) copies up to 16 bytes. Excess bytes truncated safely.`;
+          logTerminal(`[EXEC] strncpy() copied ${Math.min(len, 16)} bytes into buffer. Boundary enforced!`, 'text-emerald-400');
+        } else {
+          document.getElementById('step-description').textContent = `strcpy() writes ${len} bytes into 16-byte destination buffer! Null-terminator search ongoing.`;
+          logTerminal(`[EXEC] strcpy() copying ${len} bytes into 16-byte buffer...`, len > 16 ? 'text-amber-400' : 'text-slate-300');
+        }
+      } else if (currentStep === 4) {
+        highlightCodeLine(8);
+        document.getElementById('step-name').textContent = 'Step 4: Privilege Check';
+        let adminVal = (len > 16 && !strncpyEnabled) ? bytes[16] : 0;
+        if (adminVal !== 0) {
+          document.getElementById('step-description').textContent = `Condition (isAdmin != 0) evaluates TRUE (${adminVal})! Granting admin privileges!`;
+          logTerminal(`[SECURITY] PRIVILEGE ESCALATION! isAdmin = ${adminVal}`, 'text-amber-400 font-bold');
+        } else {
+          document.getElementById('step-description').textContent = 'Condition (isAdmin != 0) evaluates FALSE (0). Standard user level.';
+          logTerminal('[EXEC] Privilege check passed: Regular user access.', 'text-slate-400');
+        }
+      } else if (currentStep === 5) {
+        highlightCodeLine(11);
+        document.getElementById('step-name').textContent = 'Step 5: Epilogue & Return';
+
+        // Check Canary Violation
+        if (canaryEnabled && len > canaryOffset && !strncpyEnabled) {
+          document.getElementById('step-description').textContent = '__stack_chk_fail() triggered! Stack Canary value was modified! Program aborting safely.';
+          logTerminal('[CRITICAL] __stack_chk_fail: STACK CANARY CORRUPTED! Execution terminated before ret.', 'text-amber-400 bg-amber-500/10 font-bold');
+          document.getElementById('cpu-status-badge').textContent = 'CANARY ABORT';
+          document.getElementById('cpu-status-badge').className = 'px-2 py-0.5 text-[10px] rounded bg-amber-500/20 text-amber-300 border border-amber-500/30';
+          checkChallengeCompletion();
+          return;
+        }
+
+        // Check EIP Overwrite
+        if (len > eipOffset && !strncpyEnabled) {
+          let eipBytes = [bytes[eipOffset], bytes[eipOffset+1], bytes[eipOffset+2], bytes[eipOffset+3]];
+          const eipNum = (eipBytes[3] << 24) | (eipBytes[2] << 16) | (eipBytes[1] << 8) | eipBytes[0];
+          const eipHex = (eipNum >>> 0).toString(16).padStart(8, '0');
+
+          if (eipHex.toLowerCase() === TARGET_ADMIN_FUNC_ADDR) {
+            document.getElementById('step-description').textContent = 'RET popped 0x00401190 into EIP! Program jumped to secret_admin_function()!';
+            logTerminal('[CRITICAL] CONTROL FLOW HIJACKED! Jumped to secret_admin_function() @ 0x00401190', 'text-rose-400 font-bold');
+            document.getElementById('cpu-status-badge').textContent = 'HIJACKED';
+            document.getElementById('cpu-status-badge').className = 'px-2 py-0.5 text-[10px] rounded bg-rose-500/20 text-rose-300 border border-rose-500/30';
+          } else {
+            document.getElementById('step-description').textContent = `RET popped invalid address 0x${eipHex} into EIP! Triggered Segmentation Fault!`;
+            logTerminal(`[CRASH] SEGMENTATION FAULT! Invalid instruction pointer: 0x${eipHex}`, 'text-red-500 font-bold');
+            document.getElementById('cpu-status-badge').textContent = 'SEGFAULT CRASH';
+            document.getElementById('cpu-status-badge').className = 'px-2 py-0.5 text-[10px] rounded bg-red-500/20 text-red-300 border border-red-500/30';
+          }
+        } else {
+          document.getElementById('step-description').textContent = 'Clean function return! EIP safely restored to caller main().';
+          logTerminal('[EXEC] Function returned cleanly to main().', 'text-emerald-400');
+          document.getElementById('cpu-status-badge').textContent = 'NORMAL';
+          document.getElementById('cpu-status-badge').className = 'px-2 py-0.5 text-[10px] rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+        }
+      }
+
+      checkChallengeCompletion();
+    }
+
+    function runFullExecution() {
+      currentStep = 0;
+      logTerminal('--- Starting Full Simulation Execution ---', 'text-brand-400 font-bold');
+      for (let i = 0; i < 5; i++) {
+        stepExecution();
+      }
+    }
+
+    function loadPreset(presetType) {
+      const input = document.getElementById('payload-input');
+      setPayloadMode('ascii');
+
+      if (presetType === 'safe') {
+        input.value = "Hello!";
+      } else if (presetType === 'full') {
+        input.value = "1234567890123456";
+      } else if (presetType === 'admin') {
+        setPayloadMode('hex');
+        input.value = "41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 01";
+      } else if (presetType === 'hijack') {
+        setPayloadMode('hex');
+        input.value = "41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 41 00 00 00 00 00 00 00 00 90 11 40 00";
+      } else if (presetType === 'crash') {
+        setPayloadMode('ascii');
+        input.value = "AAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+      }
+
+      handleInputUpdate();
+      logTerminal(`[PRESET] Loaded preset: ${presetType.toUpperCase()}`, 'text-brand-300');
+    }
+
+    function loadChallengePreset(chNum) {
+      switchTab('sim');
+      if (chNum === 1) loadPreset('safe');
+      if (chNum === 2) loadPreset('admin');
+      if (chNum === 3) loadPreset('hijack');
+      if (chNum === 4) {
+        document.getElementById('canary-toggle').checked = true;
+        toggleCanary();
+        loadPreset('hijack');
+      }
+    }
+
+    function checkChallengeCompletion() {
+      const bytes = payloadBytes;
+      const len = bytes.length;
+      const eipOffset = BUFFER_SIZE + ADMIN_VAR_SIZE + (canaryEnabled ? CANARY_SIZE : 0) + EBP_SIZE;
+
+      // Challenge 1: Normal Operation (length <= 16)
+      if (len > 0 && len <= 16) {
+        markChallengeSolved(1);
+      }
+
+      // Challenge 2: Privilege Escalation (isAdmin != 0, length > 16)
+      if (len > 16 && bytes[16] !== 0 && !strncpyEnabled) {
+        markChallengeSolved(2);
+      }
+
+      // Challenge 3: Hijack EIP (EIP = 0x00401190)
+      if (len > eipOffset && !strncpyEnabled && !canaryEnabled) {
+        let eipBytes = [bytes[eipOffset], bytes[eipOffset+1], bytes[eipOffset+2], bytes[eipOffset+3]];
+        const eipNum = (eipBytes[3] << 24) | (eipBytes[2] << 16) | (eipBytes[1] << 8) | eipBytes[0];
+        const eipHex = (eipNum >>> 0).toString(16).padStart(8, '0');
+        if (eipHex.toLowerCase() === TARGET_ADMIN_FUNC_ADDR) {
+          markChallengeSolved(3);
+        }
+      }
+
+      // Challenge 4: Canary Interception (canary active, overflow attempt)
+      if (canaryEnabled && len > (BUFFER_SIZE + ADMIN_VAR_SIZE) && !strncpyEnabled) {
+        markChallengeSolved(4);
+      }
+    }
+
+    function markChallengeSolved(chNum) {
+      challengeStatus[chNum - 1] = true;
+      const badge = document.getElementById(`ch${chNum}-badge`);
+      if (badge) {
+        badge.textContent = "SOLVED ✓";
+        badge.className = "absolute top-3 right-3 text-xs font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+      }
+    }
+
+    function resetSimulation() {
+      document.getElementById('payload-input').value = '';
+      document.getElementById('canary-toggle').checked = false;
+      document.getElementById('strncpy-toggle').checked = false;
+      canaryEnabled = false;
+      strncpyEnabled = false;
+      toggleCanary();
+      toggleStrncpy();
+      setPayloadMode('ascii');
+      handleInputUpdate();
+      clearConsole();
+      logTerminal('[SYSTEM] Simulation reset to default state.', 'text-slate-400');
+    }
+
+    function logTerminal(msg, colorClass = 'text-slate-300') {
+      const term = document.getElementById('terminal-body');
+      const timeStr = new Date().toLocaleTimeString().split(' ')[0];
+      const div = document.createElement('div');
+      div.className = `terminal-line ${colorClass}`;
+      div.innerHTML = `<span class="text-slate-600">[${timeStr}]</span> ${msg}`;
+      term.appendChild(div);
+      term.scrollTop = term.scrollHeight;
+    }
+
+    function clearConsole() {
+      const term = document.getElementById('terminal-body');
+      term.innerHTML = '<div class="text-slate-500">[SYSTEM] Terminal log cleared.</div>';
+    }
+
+    function generateMarkdownFiles() {
+      const studentName = document.getElementById('meta-student-name').value || "Student Developer";
+      const courseTitle = document.getElementById('meta-course-title').value || "Computer Security";
+
+      // README.md Generator
+      const readme = `# Buffer Overflow Educational Visualizer & Simulator
+
+## Course & Project Information
+- **Course:** ${courseTitle}
+- **Author/Team:** ${studentName}
+- **Topic:** x86 Stack Frame Buffer Overflow Mechanics & Defenses
+
+## Overview
+This interactive web application provides a visual teaching laboratory for understanding call stack memory allocation, contiguous array buffer writes, unsafe C API vulnerabilities (\`strcpy\`), and modern security controls (Stack Canaries and \`strncpy\` bounds checking).
+
+## Key Features & Visual Components
+1. **Interactive Stack Memory Visualizer:** Real-time cell-by-cell memory grid displaying contiguous address allocation from High Addresses to Low Addresses.
+2. **Dynamic Overwrite Detection:** Visually demonstrates how memory spills over contiguous boundaries into \`isAdmin\`, Saved EBP, and Saved Return Address (EIP).
+3. **C Code Execution Line Highlight:** Step-by-step code execution showing the prologue, local variable initialization, buffer copying, condition evaluation, and return epilogue.
+4. **Preset Exploit Scenarios:** Quick-load presets for Safe Input, Buffer Capacity Limit, Privilege Escalation, Control Flow Hijacking, and Segmentation Fault crashes.
+5. **Security Defenses Playground:** Toggle Stack Guards (Canaries) and Safe Bounded APIs (\`strncpy\`).
+
+## How to Run
+1. Open \`index.html\` in any standard desktop or mobile web browser.
+2. Select a preset scenario or type custom ASCII / HEX payloads into the input box.
+3. Click **Step Execution** or **Execute Function** to observe memory state shifts in real time.
+`;
+
+      // reflection.md Generator
+      const reflection = `# Reflection: Deepening Security Concepts Through AI-Assisted Visualization
+
+**Author:** ${studentName}  
+**Course:** ${courseTitle}  
+**Topic Focus:** x86 Call Stack Frame Memory Management and Buffer Overflows
+
+---
+
+### 1. Topic Selection & Educational Purpose
+For this assignment, I focused on building an interactive browser-based simulator for **x86 Stack Buffer Overflows**. Call stack memory corruption is one of the foundational principles in computer security, yet students frequently struggle with the directional paradox: *why does an array write upward in memory addresses while stack frames grow downward toward lower memory addresses?* 
+
+By building a cell-by-cell live memory inspector, this web application makes abstract stack frame mechanics tangible. Learners can observe raw ASCII/Hex payload bytes directly altering the adjacent \`isAdmin\` local variable and popping malicious return addresses into the CPU Instruction Pointer (EIP).
+
+---
+
+### 2. Workflow & AI-Assisted Development Experience
+I utilized AI-assisted development to rapid-prototype the stack layout engine and interactive Tailwind CSS interface. My workflow involved:
+1. **Architecture Planning:** Specifying exact x86 stack frame offset boundaries (\`buffer[16]\`, \`isAdmin[4]\`, Stack Canary \`0xDEADBEEF\`, Saved EBP, Saved EIP).
+2. **Iterative Component Design:** Generating reactive memory grid renderers, line-by-line C code inspectors, and simulated CPU registers.
+3. **Verification & Testing:** Crafting edge-case hex payloads to verify that Little-Endian address formatting correctly reflects x86 CPU register states.
+
+---
+
+### 3. Key Technical Takeaways & Insights
+Building and testing this simulator reinforced four core security principles:
+* **The Vulnerability Root Cause:** Unbounded memory functions like \`strcpy()\` rely solely on null-terminators (\`\\0\`), making them fundamentally unsafe when receiving untrusted user inputs.
+* **Privilege Escalation vs Control Flow Hijacking:** Overwriting a single byte past a buffer boundary can flip boolean security flags (\`isAdmin\`), whereas overwriting saved return pointers alters execution targets entirely.
+* **Stack Canary Protection:** Placed between local variables and frame pointers, canary words catch memory corruption prior to function return (\`ret\`), safely terminating execution via \`__stack_chk_fail()\`.
+* **Safe Coding Practices:** Migration to bounded APIs like \`strncpy()\` prevents contiguous memory spillover at compile time.
+`;
+
+      document.getElementById('readme-output').value = readme;
+      document.getElementById('reflection-output').value = reflection;
+    }
+
+    function copyToClipboard(elementId) {
+      const textarea = document.getElementById(elementId);
+      textarea.select();
+      document.execCommand('copy');
+      logTerminal(`[CLIPBOARD] Copied ${elementId} content to clipboard!`, 'text-emerald-400');
+    }
+
+    window.onload = function() {
+      generateMarkdownFiles();
+      resetSimulation();
+      loadPreset('safe');
+    };
+  </script>
+</body>
+</html>
